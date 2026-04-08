@@ -39,6 +39,7 @@ func main() {
 	tokenRepo := repository.NewTokenRepo(pool)
 	subRepo := repository.NewSubscriptionRepo(pool)
 	sessionRepo := repository.NewSessionRepo(pool)
+	apiKeyRepo := repository.NewAPIKeyRepo(pool)
 
 	// Services
 	authSvc := service.NewAuthService(userRepo, tokenRepo, cfg.JWTSecret)
@@ -50,8 +51,9 @@ func main() {
 	authH := handler.NewAuthHandler(authSvc)
 	userH := handler.NewUserHandler(userRepo, subRepo)
 	subH := handler.NewSubscriptionHandler(subRepo)
-	npH := handler.NewNPHandler(npClient, userRepo)
+	npH := handler.NewNPHandler(npClient, apiKeyRepo)
 	sessionH := handler.NewSessionHandler(sessionRepo)
+	apiKeyH := handler.NewAPIKeyHandler(apiKeyRepo)
 
 	// Middleware factories
 	jwtMW := mw.JWT(authSvc)
@@ -76,8 +78,12 @@ func main() {
 
 			r.Get("/me", userH.Me)
 			r.Patch("/me", userH.UpdateMe)
-			r.Put("/me/api-key", userH.UpdateAPIKey)
 			r.Get("/me/subscription", userH.MySubscription)
+
+			r.Get("/me/api-keys", apiKeyH.List)
+			r.Post("/me/api-keys", apiKeyH.Create)
+			r.Patch("/me/api-keys/{id}/activate", apiKeyH.Activate)
+			r.Delete("/me/api-keys/{id}", apiKeyH.Delete)
 
 			// Sessions (user own)
 			r.Get("/sessions", sessionH.List)
@@ -85,6 +91,7 @@ func main() {
 			r.Group(func(r chi.Router) {
 				r.Use(requireSub)
 				r.Post("/sessions", sessionH.Create)
+				r.Put("/sessions/{id}/ttns", sessionH.SaveTTNs)
 				r.Patch("/sessions/{id}", sessionH.Finish)
 			})
 

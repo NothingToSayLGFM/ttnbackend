@@ -2,11 +2,14 @@ package db
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
-	"os"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+//go:embed migrations/001_init.up.sql
+var initSQL string
 
 func NewPool(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 	pool, err := pgxpool.New(ctx, dsn)
@@ -20,10 +23,6 @@ func NewPool(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 }
 
 func RunMigrations(ctx context.Context, pool *pgxpool.Pool) error {
-	sql, err := os.ReadFile("internal/db/migrations/001_init.up.sql")
-	if err != nil {
-		return fmt.Errorf("read migration: %w", err)
-	}
-	_, err = pool.Exec(ctx, string(sql))
+	_, err := pool.Exec(ctx, initSQL)
 	return err
 }

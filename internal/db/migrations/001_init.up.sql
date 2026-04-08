@@ -53,3 +53,25 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
     revoked    BOOLEAN NOT NULL DEFAULT false
 );
 CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id);
+
+CREATE TABLE IF NOT EXISTS np_api_keys (
+    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    label      TEXT NOT NULL,
+    api_key    TEXT NOT NULL,
+    is_active  BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_np_api_keys_user_id ON np_api_keys(user_id);
+
+-- Superadmin seed (change email and password before first run)
+INSERT INTO users (email, name, password_hash, role)
+VALUES (
+    'admin@example.com',
+    'Admin',
+    crypt('changeme123', gen_salt('bf', 10)),
+    'admin'
+)
+ON CONFLICT (email) DO NOTHING;
+-- Admin has permanent access via role check (no subscription row needed).
+-- Role 'admin' bypasses RequireSubscription middleware and always returns active: true from /me/subscription.

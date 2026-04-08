@@ -10,20 +10,20 @@ import (
 )
 
 type NPHandler struct {
-	client *novaposhta.Client
-	users  *repository.UserRepo
+	client  *novaposhta.Client
+	apiKeys *repository.APIKeyRepo
 }
 
-func NewNPHandler(client *novaposhta.Client, users *repository.UserRepo) *NPHandler {
-	return &NPHandler{client: client, users: users}
+func NewNPHandler(client *novaposhta.Client, apiKeys *repository.APIKeyRepo) *NPHandler {
+	return &NPHandler{client: client, apiKeys: apiKeys}
 }
 
 func (h *NPHandler) apiKey(r *http.Request) (string, error) {
-	u, err := h.users.FindByID(r.Context(), mw.GetUserID(r))
+	k, err := h.apiKeys.FindActiveByUserID(r.Context(), mw.GetUserID(r))
 	if err != nil {
 		return "", err
 	}
-	return u.NPAPIKey, nil
+	return k.APIKey, nil
 }
 
 func (h *NPHandler) Validate(w http.ResponseWriter, r *http.Request) {

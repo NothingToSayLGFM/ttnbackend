@@ -19,7 +19,10 @@ func NewSessionHandler(sessions *repository.SessionRepo) *SessionHandler {
 }
 
 func (h *SessionHandler) Create(w http.ResponseWriter, r *http.Request) {
-	s, err := h.sessions.Create(r.Context(), mw.GetUserID(r))
+	userID := mw.GetUserID(r)
+	// Abandon any lingering running sessions before starting a new one
+	_ = h.sessions.AbandonRunning(r.Context(), userID)
+	s, err := h.sessions.Create(r.Context(), userID)
 	if err != nil {
 		Error(w, http.StatusInternalServerError, "failed to create session")
 		return
@@ -57,9 +60,24 @@ func (h *SessionHandler) Get(w http.ResponseWriter, r *http.Request) {
 	JSON(w, http.StatusOK, map[string]any{"session": s, "ttns": ttns})
 }
 
+func (h *SessionHandler) SaveTTNs(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		TTNs []*domain.SessionTTN `json:"ttns"`
+	}
+	if err := Decode(r, &body); err != nil {
+		Error(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if len(body.TTNs) > 0 {
+		_ = h.sessions.ReplaceTTNs(r.Context(), id, body.TTNs)
+	}
+	JSON(w, http.StatusOK, map[string]string{"message": "saved"})
+}
+
 func (h *SessionHandler) Finish(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Status string              `json:"status"`
+		Status string               `json:"status"`
 		TTNs   []*domain.SessionTTN `json:"ttns"`
 	}
 	if err := Decode(r, &body); err != nil {
@@ -67,8 +85,8 @@ func (h *SessionHandler) Finish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := chi.URLParam(r, "id")
-	if body.TTNs != nil {
-		_ = h.sessions.AddTTNs(r.Context(), id, body.TTNs)
+	if len(body.TTNs) > 0 {
+		_ = h.sessions.ReplaceTTNs(r.Context(), id, body.TTNs)
 	}
 	status := domain.SessionDone
 	if body.Status == string(domain.SessionError) {

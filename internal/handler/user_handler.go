@@ -51,20 +51,13 @@ func (h *UserHandler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 	JSON(w, http.StatusOK, u.Public())
 }
 
-func (h *UserHandler) UpdateAPIKey(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		APIKey string `json:"api_key"`
-	}
-	if err := Decode(r, &body); err != nil || body.APIKey == "" {
-		Error(w, http.StatusBadRequest, "api_key required")
-		return
-	}
-	userID := mw.GetUserID(r)
-	_ = h.users.UpdateNPAPIKey(r.Context(), userID, body.APIKey)
-	JSON(w, http.StatusOK, map[string]string{"message": "api key updated"})
-}
 
 func (h *UserHandler) MySubscription(w http.ResponseWriter, r *http.Request) {
+	// Admin always has an active subscription
+	if mw.GetRole(r) == domain.RoleAdmin {
+		JSON(w, http.StatusOK, domain.SubscriptionStatus{Active: true})
+		return
+	}
 	sub, err := h.subs.FindActiveByUserID(r.Context(), mw.GetUserID(r))
 	if errors.Is(err, domain.ErrNotFound) {
 		JSON(w, http.StatusOK, domain.SubscriptionStatus{Active: false})

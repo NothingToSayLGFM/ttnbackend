@@ -82,12 +82,50 @@ func scanSessions(rows pgx.Rows, db *pgxpool.Pool, ctx context.Context, countQ s
 	return sessions, total, nil
 }
 
+// AbandonRunning marks all running sessions of a user as done before creating a new one.
+func (r *SessionRepo) AbandonRunning(ctx context.Context, userID string) error {
+	_, err := r.db.Exec(ctx,
+		`UPDATE sessions SET status='done', finished_at=now()
+		 WHERE user_id=$1 AND status='running'`,
+		userID,
+	)
+	return err
+}
+
 func (r *SessionRepo) Finish(ctx context.Context, id string, status domain.SessionStatus) error {
 	_, err := r.db.Exec(ctx,
 		`UPDATE sessions SET status=$1, finished_at=now() WHERE id=$2`,
 		status, id,
 	)
 	return err
+}
+
+// ReplaceTTNs deletes existing TTNs for the session and inserts the new ones.
+func (r *SessionRepo) ReplaceTTNs(ctx context.Context, sessionID string, ttns []*domain.SessionTTN) error {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `DELETE FROM session_ttns WHERE session_id=$1`, sessionID); err != nil {
+		return err
+	}
+	for _, t := range ttns {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO session_ttns (session_id, ttn, status, message, registry) VALUES ($1,$2,$3,$4,$5)`,
+			sessionID, t.TTN, t.Status, t.Message, t.Registry,
+		); err != nil {
+			return fmt.Errorf("insert ttn: %w", err)
+		}
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE sessions SET ttn_count=(SELECT COUNT(*) FROM session_ttns WHERE session_id=$1) WHERE id=$1`,
+		sessionID,
+	); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func (r *SessionRepo) AddTTNs(ctx context.Context, sessionID string, ttns []*domain.SessionTTN) error {
