@@ -20,8 +20,8 @@ func NewUserRepo(db *pgxpool.Pool) *UserRepo {
 
 func (r *UserRepo) Create(ctx context.Context, u *domain.User) error {
 	_, err := r.db.Exec(ctx,
-		`INSERT INTO users (id, email, name, password_hash, role, np_api_key, created_at, updated_at)
-		 VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, now(), now())`,
+		`INSERT INTO users (id, email, name, password_hash, role, np_api_key, scan_balance, created_at, updated_at)
+		 VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, 100, now(), now())`,
 		u.Email, u.Name, u.PasswordHash, u.Role, u.NPAPIKey,
 	)
 	if err != nil {
@@ -33,9 +33,9 @@ func (r *UserRepo) Create(ctx context.Context, u *domain.User) error {
 func (r *UserRepo) FindByEmail(ctx context.Context, email string) (*domain.User, error) {
 	u := &domain.User{}
 	err := r.db.QueryRow(ctx,
-		`SELECT id, email, name, password_hash, role, COALESCE(np_api_key,''), created_at, updated_at
+		`SELECT id, email, name, password_hash, role, COALESCE(np_api_key,''), scan_balance, COALESCE(desktop_token,''), created_at, updated_at
 		 FROM users WHERE email = $1`, email,
-	).Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &u.Role, &u.NPAPIKey, &u.CreatedAt, &u.UpdatedAt)
+	).Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &u.Role, &u.NPAPIKey, &u.ScanBalance, &u.DesktopToken, &u.CreatedAt, &u.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, domain.ErrNotFound
 	}
@@ -48,9 +48,9 @@ func (r *UserRepo) FindByEmail(ctx context.Context, email string) (*domain.User,
 func (r *UserRepo) FindByID(ctx context.Context, id string) (*domain.User, error) {
 	u := &domain.User{}
 	err := r.db.QueryRow(ctx,
-		`SELECT id, email, name, password_hash, role, COALESCE(np_api_key,''), created_at, updated_at
+		`SELECT id, email, name, password_hash, role, COALESCE(np_api_key,''), scan_balance, COALESCE(desktop_token,''), created_at, updated_at
 		 FROM users WHERE id = $1`, id,
-	).Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &u.Role, &u.NPAPIKey, &u.CreatedAt, &u.UpdatedAt)
+	).Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &u.Role, &u.NPAPIKey, &u.ScanBalance, &u.DesktopToken, &u.CreatedAt, &u.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, domain.ErrNotFound
 	}
@@ -60,9 +60,24 @@ func (r *UserRepo) FindByID(ctx context.Context, id string) (*domain.User, error
 	return u, nil
 }
 
+func (r *UserRepo) FindByEmailAndToken(ctx context.Context, email, token string) (*domain.User, error) {
+	u := &domain.User{}
+	err := r.db.QueryRow(ctx,
+		`SELECT id, email, name, password_hash, role, COALESCE(np_api_key,''), scan_balance, COALESCE(desktop_token,''), created_at, updated_at
+		 FROM users WHERE email = $1 AND desktop_token = $2`, email, token,
+	).Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &u.Role, &u.NPAPIKey, &u.ScanBalance, &u.DesktopToken, &u.CreatedAt, &u.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, domain.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find user by email and token: %w", err)
+	}
+	return u, nil
+}
+
 func (r *UserRepo) List(ctx context.Context, limit, offset int) ([]*domain.User, int, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT id, email, name, password_hash, role, COALESCE(np_api_key,''), created_at, updated_at
+		`SELECT id, email, name, password_hash, role, COALESCE(np_api_key,''), scan_balance, COALESCE(desktop_token,''), created_at, updated_at
 		 FROM users ORDER BY created_at DESC LIMIT $1 OFFSET $2`, limit, offset,
 	)
 	if err != nil {
@@ -73,7 +88,7 @@ func (r *UserRepo) List(ctx context.Context, limit, offset int) ([]*domain.User,
 	var users []*domain.User
 	for rows.Next() {
 		u := &domain.User{}
-		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &u.Role, &u.NPAPIKey, &u.CreatedAt, &u.UpdatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &u.Role, &u.NPAPIKey, &u.ScanBalance, &u.DesktopToken, &u.CreatedAt, &u.UpdatedAt); err != nil {
 			return nil, 0, err
 		}
 		users = append(users, u)
@@ -101,6 +116,32 @@ func (r *UserRepo) UpdateNPAPIKey(ctx context.Context, id, key string) error {
 
 func (r *UserRepo) UpdateRole(ctx context.Context, id string, role domain.Role) error {
 	_, err := r.db.Exec(ctx, `UPDATE users SET role=$1, updated_at=now() WHERE id=$2`, role, id)
+	return err
+}
+
+func (r *UserRepo) UpdateScanBalance(ctx context.Context, id string, balance int) error {
+	_, err := r.db.Exec(ctx, `UPDATE users SET scan_balance=$1, updated_at=now() WHERE id=$2`, balance, id)
+	return err
+}
+
+// DeductScanBalance atomically deducts n scans. Returns domain.ErrConflict if balance is insufficient.
+func (r *UserRepo) DeductScanBalance(ctx context.Context, id string, n int) error {
+	tag, err := r.db.Exec(ctx,
+		`UPDATE users SET scan_balance = scan_balance - $1, updated_at = now()
+		 WHERE id = $2 AND scan_balance >= $1`,
+		n, id,
+	)
+	if err != nil {
+		return fmt.Errorf("deduct scan balance: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrInsufficientBalance
+	}
+	return nil
+}
+
+func (r *UserRepo) SetDesktopToken(ctx context.Context, id, token string) error {
+	_, err := r.db.Exec(ctx, `UPDATE users SET desktop_token=$1, updated_at=now() WHERE id=$2`, token, id)
 	return err
 }
 

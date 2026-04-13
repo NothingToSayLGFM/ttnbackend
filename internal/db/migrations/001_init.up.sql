@@ -64,14 +64,20 @@ CREATE TABLE IF NOT EXISTS np_api_keys (
 );
 CREATE INDEX IF NOT EXISTS idx_np_api_keys_user_id ON np_api_keys(user_id);
 
+-- Scan balance: -1 means unlimited (admin), >= 0 means remaining scans
+ALTER TABLE users ADD COLUMN IF NOT EXISTS scan_balance INT NOT NULL DEFAULT 100;
+
+-- Desktop app token: used to authenticate the desktop app without full JWT auth
+ALTER TABLE users ADD COLUMN IF NOT EXISTS desktop_token TEXT;
+
 -- Superadmin seed (change email and password before first run)
-INSERT INTO users (email, name, password_hash, role)
+INSERT INTO users (email, name, password_hash, role, scan_balance)
 VALUES (
     'admin@example.com',
     'Admin',
     crypt('changeme123', gen_salt('bf', 10)),
-    'admin'
+    'admin',
+    -1
 )
-ON CONFLICT (email) DO NOTHING;
--- Admin has permanent access via role check (no subscription row needed).
--- Role 'admin' bypasses RequireSubscription middleware and always returns active: true from /me/subscription.
+ON CONFLICT (email) DO UPDATE SET scan_balance = -1 WHERE users.role = 'admin';
+-- Role 'admin' bypasses scan balance checks; scan_balance = -1 is a UI marker for "unlimited".

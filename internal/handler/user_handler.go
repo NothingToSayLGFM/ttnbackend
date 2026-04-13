@@ -14,11 +14,10 @@ import (
 
 type UserHandler struct {
 	users *repository.UserRepo
-	subs  *repository.SubscriptionRepo
 }
 
-func NewUserHandler(users *repository.UserRepo, subs *repository.SubscriptionRepo) *UserHandler {
-	return &UserHandler{users: users, subs: subs}
+func NewUserHandler(users *repository.UserRepo) *UserHandler {
+	return &UserHandler{users: users}
 }
 
 func (h *UserHandler) Me(w http.ResponseWriter, r *http.Request) {
@@ -49,25 +48,6 @@ func (h *UserHandler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 	}
 	u, _ := h.users.FindByID(r.Context(), userID)
 	JSON(w, http.StatusOK, u.Public())
-}
-
-
-func (h *UserHandler) MySubscription(w http.ResponseWriter, r *http.Request) {
-	// Admin always has an active subscription
-	if mw.GetRole(r) == domain.RoleAdmin {
-		JSON(w, http.StatusOK, domain.SubscriptionStatus{Active: true})
-		return
-	}
-	sub, err := h.subs.FindActiveByUserID(r.Context(), mw.GetUserID(r))
-	if errors.Is(err, domain.ErrNotFound) {
-		JSON(w, http.StatusOK, domain.SubscriptionStatus{Active: false})
-		return
-	}
-	if err != nil {
-		Error(w, http.StatusInternalServerError, "internal error")
-		return
-	}
-	JSON(w, http.StatusOK, domain.SubscriptionStatus{Active: true, StartsAt: sub.StartsAt, EndsAt: sub.EndsAt})
 }
 
 // Admin handlers
@@ -114,6 +94,23 @@ func (h *UserHandler) AdminUpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Role != "" {
 		_ = h.users.UpdateRole(r.Context(), id, body.Role)
+	}
+	u, _ := h.users.FindByID(r.Context(), id)
+	JSON(w, http.StatusOK, u.Public())
+}
+
+func (h *UserHandler) AdminSetScanBalance(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Balance int `json:"balance"`
+	}
+	if err := Decode(r, &body); err != nil {
+		Error(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if err := h.users.UpdateScanBalance(r.Context(), id, body.Balance); err != nil {
+		Error(w, http.StatusInternalServerError, "internal error")
+		return
 	}
 	u, _ := h.users.FindByID(r.Context(), id)
 	JSON(w, http.StatusOK, u.Public())

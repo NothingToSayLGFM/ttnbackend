@@ -8,22 +8,24 @@ import (
 )
 
 type Config struct {
-	DatabaseURL string
-	JWTSecret   string
-	Port        string
-	NPAPIURL    string
-	TelegramURL string
+	DatabaseURL     string
+	JWTSecret       string
+	Port            string
+	NPAPIURL        string
+	TelegramURL     string
+	DesktopAppPath  string
 }
 
 func Load() (*Config, error) {
 	_ = godotenv.Load()
 
 	cfg := &Config{
-		DatabaseURL: os.Getenv("DATABASE_URL"),
-		JWTSecret:   os.Getenv("JWT_SECRET"),
-		Port:        os.Getenv("PORT"),
-		NPAPIURL:    os.Getenv("NP_API_URL"),
-		TelegramURL: os.Getenv("TELEGRAM_URL"),
+		DatabaseURL:    os.Getenv("DATABASE_URL"),
+		JWTSecret:      os.Getenv("JWT_SECRET"),
+		Port:           os.Getenv("PORT"),
+		NPAPIURL:       os.Getenv("NP_API_URL"),
+		TelegramURL:    os.Getenv("TELEGRAM_URL"),
+		DesktopAppPath: os.Getenv("DESKTOP_APP_PATH"),
 	}
 
 	if cfg.DatabaseURL == "" {
@@ -37,6 +39,9 @@ func Load() (*Config, error) {
 	}
 	if cfg.NPAPIURL == "" {
 		cfg.NPAPIURL = "https://api.novaposhta.ua/v2.0/json/"
+	}
+	if cfg.DesktopAppPath == "" {
+		cfg.DesktopAppPath = "./static/NovaPoshtaScanner"
 	}
 
 	return cfg, nil

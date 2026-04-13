@@ -1,10 +1,12 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
 	mw "ttnflow-api/internal/handler/middleware"
+	"ttnflow-api/internal/domain"
 	"ttnflow-api/internal/novaposhta"
 	"ttnflow-api/internal/repository"
 )
@@ -12,10 +14,11 @@ import (
 type NPHandler struct {
 	client  *novaposhta.Client
 	apiKeys *repository.APIKeyRepo
+	users   *repository.UserRepo
 }
 
-func NewNPHandler(client *novaposhta.Client, apiKeys *repository.APIKeyRepo) *NPHandler {
-	return &NPHandler{client: client, apiKeys: apiKeys}
+func NewNPHandler(client *novaposhta.Client, apiKeys *repository.APIKeyRepo, users *repository.UserRepo) *NPHandler {
+	return &NPHandler{client: client, apiKeys: apiKeys, users: users}
 }
 
 func (h *NPHandler) apiKey(r *http.Request) (string, error) {
@@ -55,6 +58,32 @@ func (h *NPHandler) Validate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Balance check and deduction for non-admin users
+	if mw.GetRole(r) != domain.RoleAdmin {
+		userID := mw.GetUserID(r)
+		u, err := h.users.FindByID(r.Context(), userID)
+		if err != nil {
+			Error(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		if u.ScanBalance < len(unique) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusPaymentRequired)
+			w.Write([]byte(`{"error":"insufficient_balance","message":"У вас недостатньо сканувань. Поповніть баланс."}`))
+			return
+		}
+		if err := h.users.DeductScanBalance(r.Context(), userID, len(unique)); err != nil {
+			if errors.Is(err, domain.ErrInsufficientBalance) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusPaymentRequired)
+				w.Write([]byte(`{"error":"insufficient_balance","message":"У вас недостатньо сканувань. Поповніть баланс."}`))
+				return
+			}
+			Error(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+	}
+
 	results := make([]novaposhta.ValidateResult, 0, len(body.TTNs))
 	for _, ttn := range body.TTNs {
 		if dupMark[ttn] {
@@ -74,7 +103,7 @@ func (h *NPHandler) Validate(w http.ResponseWriter, r *http.Request) {
 
 func (h *NPHandler) Distribute(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		SessionID string                     `json:"session_id"`
+		SessionID string                      `json:"session_id"`
 		Groups    []novaposhta.DistributeInput `json:"groups"`
 	}
 	if err := Decode(r, &body); err != nil {

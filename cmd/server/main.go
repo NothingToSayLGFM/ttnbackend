@@ -37,7 +37,6 @@ func main() {
 	// Repositories
 	userRepo := repository.NewUserRepo(pool)
 	tokenRepo := repository.NewTokenRepo(pool)
-	subRepo := repository.NewSubscriptionRepo(pool)
 	sessionRepo := repository.NewSessionRepo(pool)
 	apiKeyRepo := repository.NewAPIKeyRepo(pool)
 
@@ -49,15 +48,14 @@ func main() {
 
 	// Handlers
 	authH := handler.NewAuthHandler(authSvc)
-	userH := handler.NewUserHandler(userRepo, subRepo)
-	subH := handler.NewSubscriptionHandler(subRepo)
-	npH := handler.NewNPHandler(npClient, apiKeyRepo)
+	userH := handler.NewUserHandler(userRepo)
+	npH := handler.NewNPHandler(npClient, apiKeyRepo, userRepo)
 	sessionH := handler.NewSessionHandler(sessionRepo)
 	apiKeyH := handler.NewAPIKeyHandler(apiKeyRepo)
+	desktopH := handler.NewDesktopHandler(userRepo, cfg.DesktopAppPath)
 
 	// Middleware factories
 	jwtMW := mw.JWT(authSvc)
-	requireSub := mw.RequireSubscription(subRepo)
 
 	r := chi.NewRouter()
 	r.Use(chimw.Logger)
@@ -70,6 +68,10 @@ func main() {
 		r.Post("/auth/login", authH.Login)
 		r.Post("/auth/refresh", authH.Refresh)
 
+		// Desktop public endpoints (auth via email+desktop_token, no JWT)
+		r.Post("/desktop/balance", desktopH.Balance)
+		r.Post("/desktop/deduct", desktopH.Deduct)
+
 		// Authenticated
 		r.Group(func(r chi.Router) {
 			r.Use(jwtMW)
@@ -78,31 +80,28 @@ func main() {
 
 			r.Get("/me", userH.Me)
 			r.Patch("/me", userH.UpdateMe)
-			r.Get("/me/subscription", userH.MySubscription)
 
 			r.Get("/me/api-keys", apiKeyH.List)
 			r.Post("/me/api-keys", apiKeyH.Create)
 			r.Patch("/me/api-keys/{id}/activate", apiKeyH.Activate)
 			r.Delete("/me/api-keys/{id}", apiKeyH.Delete)
 
-			// Sessions (user own)
+			// Sessions
 			r.Get("/sessions", sessionH.List)
 			r.Get("/sessions/{id}", sessionH.Get)
-			r.Group(func(r chi.Router) {
-				r.Use(requireSub)
-				r.Post("/sessions", sessionH.Create)
-				r.Put("/sessions/{id}/ttns", sessionH.SaveTTNs)
-				r.Patch("/sessions/{id}", sessionH.Finish)
-			})
+			r.Post("/sessions", sessionH.Create)
+			r.Put("/sessions/{id}/ttns", sessionH.SaveTTNs)
+			r.Patch("/sessions/{id}", sessionH.Finish)
 
-			// Nova Poshta proxy (requires subscription)
-			r.Group(func(r chi.Router) {
-				r.Use(requireSub)
-				r.Post("/np/validate", npH.Validate)
-				r.Post("/np/distribute", npH.Distribute)
-				r.Get("/np/scan-sheets", npH.ScanSheets)
-				r.Get("/np/printed", npH.Printed)
-			})
+			// Nova Poshta proxy (balance checked inside handler)
+			r.Post("/np/validate", npH.Validate)
+			r.Post("/np/distribute", npH.Distribute)
+			r.Get("/np/scan-sheets", npH.ScanSheets)
+			r.Get("/np/printed", npH.Printed)
+
+			// Desktop app download
+			r.Get("/me/download-app", desktopH.DownloadApp)
+			r.Post("/me/reset-desktop-token", desktopH.ResetToken)
 
 			// Admin
 			r.Group(func(r chi.Router) {
@@ -111,9 +110,7 @@ func main() {
 				r.Get("/admin/users/{id}", userH.AdminGetUser)
 				r.Patch("/admin/users/{id}", userH.AdminUpdateUser)
 				r.Delete("/admin/users/{id}", userH.AdminDeleteUser)
-				r.Get("/admin/users/{id}/subscriptions", subH.List)
-				r.Post("/admin/users/{id}/subscriptions", subH.Grant)
-				r.Delete("/admin/subscriptions/{sub_id}", subH.Delete)
+				r.Patch("/admin/users/{id}/scan-balance", userH.AdminSetScanBalance)
 				r.Get("/admin/sessions", sessionH.AdminList)
 			})
 		})
