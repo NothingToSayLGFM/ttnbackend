@@ -52,7 +52,7 @@ func main() {
 	npH := handler.NewNPHandler(npClient, apiKeyRepo, userRepo)
 	sessionH := handler.NewSessionHandler(sessionRepo)
 	apiKeyH := handler.NewAPIKeyHandler(apiKeyRepo)
-	desktopH := handler.NewDesktopHandler(userRepo, cfg.DesktopAppPath)
+	desktopH := handler.NewDesktopHandler(userRepo, cfg.DesktopAppPath, cfg.ZebraAppPath)
 
 	// Middleware factories
 	jwtMW := mw.JWT(authSvc)
@@ -101,6 +101,7 @@ func main() {
 
 			// Desktop app download
 			r.Get("/me/download-app", desktopH.DownloadApp)
+			r.Get("/me/download-zebra-app", desktopH.DownloadZebraApp)
 			r.Post("/me/reset-desktop-token", desktopH.ResetToken)
 
 			// Admin

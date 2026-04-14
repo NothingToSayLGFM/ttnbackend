@@ -18,10 +18,11 @@ import (
 type DesktopHandler struct {
 	users          *repository.UserRepo
 	desktopAppPath string
+	zebraAppPath   string
 }
 
-func NewDesktopHandler(users *repository.UserRepo, desktopAppPath string) *DesktopHandler {
-	return &DesktopHandler{users: users, desktopAppPath: desktopAppPath}
+func NewDesktopHandler(users *repository.UserRepo, desktopAppPath, zebraAppPath string) *DesktopHandler {
+	return &DesktopHandler{users: users, desktopAppPath: desktopAppPath, zebraAppPath: zebraAppPath}
 }
 
 // DownloadApp generates a desktop token, bundles config.json into the app zip, and serves it.
@@ -47,9 +48,41 @@ func (h *DesktopHandler) DownloadApp(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", "attachment; filename=\"NovaPoshtaScanner.zip\"")
 
-	if err := h.buildZip(w, u.Email, token); err != nil {
+	if err := h.buildZipTo(w, u.Email, token, h.desktopAppPath, "NovaPoshtaScanner"); err != nil {
 		// Headers already sent, can't send error JSON — log it
 		fmt.Printf("desktop: build zip error: %v\n", err)
+	}
+}
+
+// DownloadZebraApp serves the Zebra TC26 scanner app with the existing desktop token embedded.
+// Does NOT regenerate the token — both apps share the same token.
+func (h *DesktopHandler) DownloadZebraApp(w http.ResponseWriter, r *http.Request) {
+	userID := mw.GetUserID(r)
+	u, err := h.users.FindByID(r.Context(), userID)
+	if err != nil {
+		Error(w, http.StatusNotFound, "user not found")
+		return
+	}
+
+	// Ensure user has a token; generate one if missing
+	token := u.DesktopToken
+	if token == "" {
+		token, err = generateToken()
+		if err != nil {
+			Error(w, http.StatusInternalServerError, "failed to generate token")
+			return
+		}
+		if err := h.users.SetDesktopToken(r.Context(), userID, token); err != nil {
+			Error(w, http.StatusInternalServerError, "failed to save token")
+			return
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", "attachment; filename=\"ZebraScanner.zip\"")
+
+	if err := h.buildZipTo(w, u.Email, token, h.zebraAppPath, "ZebraScanner"); err != nil {
+		fmt.Printf("desktop: build zebra zip error: %v\n", err)
 	}
 }
 
@@ -121,15 +154,14 @@ func (h *DesktopHandler) Deduct(w http.ResponseWriter, r *http.Request) {
 	JSON(w, http.StatusOK, map[string]int{"scan_balance": updated.ScanBalance})
 }
 
-// buildZip writes the NovaPoshtaScanner folder + config.json into w as a zip archive.
-func (h *DesktopHandler) buildZip(w io.Writer, email, token string) error {
+// buildZipTo writes appPath folder + config.json into w as a zip archive.
+// folderName is used as the zip root folder name and as the config.json parent path.
+func (h *DesktopHandler) buildZipTo(w io.Writer, email, token, appPath, folderName string) error {
 	zw := zip.NewWriter(w)
 	defer zw.Close()
 
-	// Walk the desktop app dist folder
-	appPath := h.desktopAppPath
 	if _, err := os.Stat(appPath); err != nil {
-		return fmt.Errorf("desktop app path not found: %s", appPath)
+		return fmt.Errorf("app path not found: %s", appPath)
 	}
 
 	err := filepath.Walk(appPath, func(path string, info os.FileInfo, err error) error {
@@ -144,7 +176,6 @@ func (h *DesktopHandler) buildZip(w io.Writer, email, token string) error {
 		if err != nil {
 			return err
 		}
-		// Use forward slashes in zip
 		rel = filepath.ToSlash(rel)
 
 		f, err := zw.Create(rel)
@@ -163,17 +194,16 @@ func (h *DesktopHandler) buildZip(w io.Writer, email, token string) error {
 		return fmt.Errorf("walking app folder: %w", err)
 	}
 
-	// Add config.json with email and token
 	cfg := map[string]string{
-		"email":          email,
-		"desktop_token":  token,
+		"email":         email,
+		"desktop_token": token,
 	}
 	cfgBytes, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}
 
-	cfgEntry, err := zw.Create("NovaPoshtaScanner/config.json")
+	cfgEntry, err := zw.Create(folderName + "/config.json")
 	if err != nil {
 		return fmt.Errorf("create config entry: %w", err)
 	}
