@@ -11,17 +11,6 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE IF NOT EXISTS subscriptions (
-    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    granted_by UUID NOT NULL REFERENCES users(id),
-    starts_at  DATE NOT NULL,
-    ends_at    DATE NOT NULL,
-    note       TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions(user_id);
-
 CREATE TABLE IF NOT EXISTS sessions (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
