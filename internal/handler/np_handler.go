@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"errors"
 	"net/http"
 	"time"
 
@@ -58,31 +57,7 @@ func (h *NPHandler) Validate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Balance check and deduction for non-admin users
-	if mw.GetRole(r) != domain.RoleAdmin {
-		userID := mw.GetUserID(r)
-		u, err := h.users.FindByID(r.Context(), userID)
-		if err != nil {
-			Error(w, http.StatusInternalServerError, "internal error")
-			return
-		}
-		if u.ScanBalance < len(unique) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusPaymentRequired)
-			w.Write([]byte(`{"error":"insufficient_balance","message":"У вас недостатньо сканувань. Поповніть баланс."}`))
-			return
-		}
-		if err := h.users.DeductScanBalance(r.Context(), userID, len(unique)); err != nil {
-			if errors.Is(err, domain.ErrInsufficientBalance) {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusPaymentRequired)
-				w.Write([]byte(`{"error":"insufficient_balance","message":"У вас недостатньо сканувань. Поповніть баланс."}`))
-				return
-			}
-			Error(w, http.StatusInternalServerError, "internal error")
-			return
-		}
-	}
+	// No balance check at validation — deduction happens after distribute only
 
 	results := make([]novaposhta.ValidateResult, 0, len(body.TTNs))
 	for _, ttn := range body.TTNs {
@@ -103,7 +78,7 @@ func (h *NPHandler) Validate(w http.ResponseWriter, r *http.Request) {
 
 func (h *NPHandler) Distribute(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		SessionID string                      `json:"session_id"`
+		SessionID string                       `json:"session_id"`
 		Groups    []novaposhta.DistributeInput `json:"groups"`
 	}
 	if err := Decode(r, &body); err != nil {
@@ -115,8 +90,37 @@ func (h *NPHandler) Distribute(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusBadRequest, "np api key not set in profile")
 		return
 	}
+
 	results := novaposhta.Distribute(h.client, apiKey, body.Groups)
-	JSON(w, http.StatusOK, map[string]any{"results": results})
+
+	// Deduct only 'done' TTNs after distribution
+	newBalance := -1
+	if mw.GetRole(r) != domain.RoleAdmin {
+		userID := mw.GetUserID(r)
+		doneCount := 0
+		for _, res := range results {
+			if res.Status == "done" {
+				doneCount++
+			}
+		}
+		if doneCount > 0 {
+			u, _ := h.users.FindByID(r.Context(), userID)
+			if u != nil && u.ScanBalance != -1 {
+				toDeduct := doneCount
+				if u.ScanBalance < toDeduct {
+					toDeduct = u.ScanBalance
+				}
+				if toDeduct > 0 {
+					_ = h.users.DeductScanBalance(r.Context(), userID, toDeduct)
+				}
+			}
+		}
+		if updated, err := h.users.FindByID(r.Context(), userID); err == nil {
+			newBalance = updated.ScanBalance
+		}
+	}
+
+	JSON(w, http.StatusOK, map[string]any{"results": results, "scan_balance": newBalance})
 }
 
 func (h *NPHandler) ScanSheets(w http.ResponseWriter, r *http.Request) {

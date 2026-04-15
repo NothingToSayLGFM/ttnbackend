@@ -207,13 +207,15 @@ func (h *DesktopHandler) ScanReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Deduct only 'done' TTNs
+	// Deduct only 'done' TTNs. If balance < doneCount, deduct whatever remains (partial, down to 0).
+	actualDeduct := 0
 	if doneCount > 0 && u.ScanBalance != -1 {
-		if err := h.users.DeductScanBalance(r.Context(), u.ID, doneCount); err != nil {
-			// Balance deduction failed — still OK, session is saved
-			updated, _ := h.users.FindByID(r.Context(), u.ID)
-			JSON(w, http.StatusOK, map[string]any{"scan_balance": updated.ScanBalance, "deducted": 0})
-			return
+		actualDeduct = doneCount
+		if u.ScanBalance < doneCount {
+			actualDeduct = u.ScanBalance // partial: drain to 0
+		}
+		if actualDeduct > 0 {
+			_ = h.users.DeductScanBalance(r.Context(), u.ID, actualDeduct)
 		}
 	}
 
