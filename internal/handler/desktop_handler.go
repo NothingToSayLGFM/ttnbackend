@@ -12,17 +12,19 @@ import (
 	"path/filepath"
 
 	mw "ttnflow-api/internal/handler/middleware"
+	"ttnflow-api/internal/domain"
 	"ttnflow-api/internal/repository"
 )
 
 type DesktopHandler struct {
 	users          *repository.UserRepo
+	sessions       *repository.SessionRepo
 	desktopAppPath string
 	zebraAppPath   string
 }
 
-func NewDesktopHandler(users *repository.UserRepo, desktopAppPath, zebraAppPath string) *DesktopHandler {
-	return &DesktopHandler{users: users, desktopAppPath: desktopAppPath, zebraAppPath: zebraAppPath}
+func NewDesktopHandler(users *repository.UserRepo, sessions *repository.SessionRepo, desktopAppPath, zebraAppPath string) *DesktopHandler {
+	return &DesktopHandler{users: users, sessions: sessions, desktopAppPath: desktopAppPath, zebraAppPath: zebraAppPath}
 }
 
 // DownloadApp generates a desktop token, bundles config.json into the app zip, and serves it.
@@ -46,9 +48,9 @@ func (h *DesktopHandler) DownloadApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/zip")
-	w.Header().Set("Content-Disposition", "attachment; filename=\"NovaPoshtaScanner.zip\"")
+	w.Header().Set("Content-Disposition", "attachment; filename=\"TTNScanner.zip\"")
 
-	if err := h.buildZipTo(w, u.Email, token, h.desktopAppPath, "NovaPoshtaScanner"); err != nil {
+	if err := h.buildZipTo(w, u.Email, token, h.desktopAppPath, "TTNScanner"); err != nil {
 		// Headers already sent, can't send error JSON — log it
 		fmt.Printf("desktop: build zip error: %v\n", err)
 	}
@@ -152,6 +154,75 @@ func (h *DesktopHandler) Deduct(w http.ResponseWriter, r *http.Request) {
 
 	updated, _ := h.users.FindByID(r.Context(), u.ID)
 	JSON(w, http.StatusOK, map[string]int{"scan_balance": updated.ScanBalance})
+}
+
+// ScanReport is a public endpoint (no JWT).
+// Accepts {email, token, device_type, ttns:[{ttn,status,registry}]},
+// saves the session with TTNs, and deducts only 'done' TTNs from balance.
+func (h *DesktopHandler) ScanReport(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Email      string `json:"email"`
+		Token      string `json:"token"`
+		DeviceType string `json:"device_type"`
+		TTNs       []struct {
+			TTN      string `json:"ttn"`
+			Status   string `json:"status"`
+			Registry string `json:"registry"`
+			Message  string `json:"message"`
+		} `json:"ttns"`
+	}
+	if err := Decode(r, &body); err != nil || body.Email == "" || body.Token == "" {
+		Error(w, http.StatusBadRequest, "email, token and ttns required")
+		return
+	}
+
+	deviceType := body.DeviceType
+	if deviceType == "" {
+		deviceType = "desktop"
+	}
+
+	u, err := h.users.FindByEmailAndToken(r.Context(), body.Email, body.Token)
+	if err != nil {
+		Error(w, http.StatusUnauthorized, "invalid credentials")
+		return
+	}
+
+	// Build domain TTNs
+	ttns := make([]*domain.SessionTTN, 0, len(body.TTNs))
+	doneCount := 0
+	for _, t := range body.TTNs {
+		ttns = append(ttns, &domain.SessionTTN{
+			TTN:      t.TTN,
+			Status:   t.Status,
+			Message:  t.Message,
+			Registry: t.Registry,
+		})
+		if t.Status == "done" {
+			doneCount++
+		}
+	}
+
+	if _, err := h.sessions.CreateFinished(r.Context(), u.ID, deviceType, ttns); err != nil {
+		Error(w, http.StatusInternalServerError, "failed to save session")
+		return
+	}
+
+	// Deduct only 'done' TTNs
+	if doneCount > 0 && u.ScanBalance != -1 {
+		if err := h.users.DeductScanBalance(r.Context(), u.ID, doneCount); err != nil {
+			// Balance deduction failed — still OK, session is saved
+			updated, _ := h.users.FindByID(r.Context(), u.ID)
+			JSON(w, http.StatusOK, map[string]any{"scan_balance": updated.ScanBalance, "deducted": 0})
+			return
+		}
+	}
+
+	updated, _ := h.users.FindByID(r.Context(), u.ID)
+	balance := -1
+	if updated != nil {
+		balance = updated.ScanBalance
+	}
+	JSON(w, http.StatusOK, map[string]any{"scan_balance": balance, "deducted": doneCount})
 }
 
 // buildZipTo writes appPath folder + config.json into w as a zip archive.

@@ -59,6 +59,9 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS scan_balance INT NOT NULL DEFAULT 100
 -- Desktop app token: used to authenticate the desktop app without full JWT auth
 ALTER TABLE users ADD COLUMN IF NOT EXISTS desktop_token TEXT;
 
+-- Device type for sessions: 'web', 'desktop', 'zebra'
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS device_type TEXT NOT NULL DEFAULT 'web';
+
 -- Superadmin seed (change email and password before first run)
 INSERT INTO users (email, name, password_hash, role, scan_balance)
 VALUES (

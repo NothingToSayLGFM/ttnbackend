@@ -43,7 +43,7 @@ func Load() (*Config, error) {
 		cfg.NPAPIURL = "https://api.novaposhta.ua/v2.0/json/"
 	}
 	if cfg.DesktopAppPath == "" {
-		cfg.DesktopAppPath = "./static/NovaPoshtaScanner"
+		cfg.DesktopAppPath = "./static/TTNScanner"
 	}
 	if cfg.ZebraAppPath == "" {
 		cfg.ZebraAppPath = "./static/ZebraScanner"

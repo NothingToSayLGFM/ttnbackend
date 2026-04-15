@@ -18,13 +18,13 @@ func NewSessionRepo(db *pgxpool.Pool) *SessionRepo {
 	return &SessionRepo{db: db}
 }
 
-func (r *SessionRepo) Create(ctx context.Context, userID string) (*domain.Session, error) {
+func (r *SessionRepo) Create(ctx context.Context, userID, deviceType string) (*domain.Session, error) {
 	s := &domain.Session{}
 	err := r.db.QueryRow(ctx,
-		`INSERT INTO sessions (user_id) VALUES ($1)
-		 RETURNING id, user_id, started_at, finished_at, ttn_count, status`,
-		userID,
-	).Scan(&s.ID, &s.UserID, &s.StartedAt, &s.FinishedAt, &s.TTNCount, &s.Status)
+		`INSERT INTO sessions (user_id, device_type) VALUES ($1, $2)
+		 RETURNING id, user_id, device_type, started_at, finished_at, ttn_count, status`,
+		userID, deviceType,
+	).Scan(&s.ID, &s.UserID, &s.DeviceType, &s.StartedAt, &s.FinishedAt, &s.TTNCount, &s.Status)
 	if err != nil {
 		return nil, fmt.Errorf("create session: %w", err)
 	}
@@ -34,8 +34,8 @@ func (r *SessionRepo) Create(ctx context.Context, userID string) (*domain.Sessio
 func (r *SessionRepo) FindByID(ctx context.Context, id string) (*domain.Session, error) {
 	s := &domain.Session{}
 	err := r.db.QueryRow(ctx,
-		`SELECT id, user_id, started_at, finished_at, ttn_count, status FROM sessions WHERE id=$1`, id,
-	).Scan(&s.ID, &s.UserID, &s.StartedAt, &s.FinishedAt, &s.TTNCount, &s.Status)
+		`SELECT id, user_id, device_type, started_at, finished_at, ttn_count, status FROM sessions WHERE id=$1`, id,
+	).Scan(&s.ID, &s.UserID, &s.DeviceType, &s.StartedAt, &s.FinishedAt, &s.TTNCount, &s.Status)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, domain.ErrNotFound
 	}
@@ -44,7 +44,7 @@ func (r *SessionRepo) FindByID(ctx context.Context, id string) (*domain.Session,
 
 func (r *SessionRepo) ListByUserID(ctx context.Context, userID string, limit, offset int) ([]*domain.Session, int, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT id, user_id, started_at, finished_at, ttn_count, status
+		`SELECT id, user_id, device_type, started_at, finished_at, ttn_count, status
 		 FROM sessions WHERE user_id=$1 ORDER BY started_at DESC LIMIT $2 OFFSET $3`,
 		userID, limit, offset,
 	)
@@ -57,22 +57,25 @@ func (r *SessionRepo) ListByUserID(ctx context.Context, userID string, limit, of
 
 func (r *SessionRepo) ListAll(ctx context.Context, limit, offset int) ([]*domain.Session, int, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT id, user_id, started_at, finished_at, ttn_count, status
-		 FROM sessions ORDER BY started_at DESC LIMIT $1 OFFSET $2`,
+		`SELECT s.id, s.user_id, s.device_type, s.started_at, s.finished_at, s.ttn_count, s.status,
+		        u.email, u.name
+		 FROM sessions s
+		 LEFT JOIN users u ON u.id = s.user_id
+		 ORDER BY s.started_at DESC LIMIT $1 OFFSET $2`,
 		limit, offset,
 	)
 	if err != nil {
 		return nil, 0, err
 	}
 	defer rows.Close()
-	return scanSessions(rows, r.db, ctx, `SELECT COUNT(*) FROM sessions`)
+	return scanSessionsAdmin(rows, r.db, ctx)
 }
 
 func scanSessions(rows pgx.Rows, db *pgxpool.Pool, ctx context.Context, countQ string, args ...any) ([]*domain.Session, int, error) {
 	var sessions []*domain.Session
 	for rows.Next() {
 		s := &domain.Session{}
-		if err := rows.Scan(&s.ID, &s.UserID, &s.StartedAt, &s.FinishedAt, &s.TTNCount, &s.Status); err != nil {
+		if err := rows.Scan(&s.ID, &s.UserID, &s.DeviceType, &s.StartedAt, &s.FinishedAt, &s.TTNCount, &s.Status); err != nil {
 			return nil, 0, err
 		}
 		sessions = append(sessions, s)
@@ -80,6 +83,63 @@ func scanSessions(rows pgx.Rows, db *pgxpool.Pool, ctx context.Context, countQ s
 	var total int
 	_ = db.QueryRow(ctx, countQ, args...).Scan(&total)
 	return sessions, total, nil
+}
+
+func scanSessionsAdmin(rows pgx.Rows, db *pgxpool.Pool, ctx context.Context) ([]*domain.Session, int, error) {
+	var sessions []*domain.Session
+	for rows.Next() {
+		s := &domain.Session{}
+		if err := rows.Scan(&s.ID, &s.UserID, &s.DeviceType, &s.StartedAt, &s.FinishedAt, &s.TTNCount, &s.Status, &s.UserEmail, &s.UserName); err != nil {
+			return nil, 0, err
+		}
+		sessions = append(sessions, s)
+	}
+	var total int
+	_ = db.QueryRow(ctx, `SELECT COUNT(*) FROM sessions`).Scan(&total)
+	return sessions, total, nil
+}
+
+// CreateFinished creates a completed session with TTNs in a single transaction.
+// Returns the finished session.
+func (r *SessionRepo) CreateFinished(ctx context.Context, userID, deviceType string, ttns []*domain.SessionTTN) (*domain.Session, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	s := &domain.Session{}
+	err = tx.QueryRow(ctx,
+		`INSERT INTO sessions (user_id, device_type, status, finished_at)
+		 VALUES ($1, $2, 'done', now())
+		 RETURNING id, user_id, device_type, started_at, finished_at, ttn_count, status`,
+		userID, deviceType,
+	).Scan(&s.ID, &s.UserID, &s.DeviceType, &s.StartedAt, &s.FinishedAt, &s.TTNCount, &s.Status)
+	if err != nil {
+		return nil, fmt.Errorf("create finished session: %w", err)
+	}
+
+	for _, t := range ttns {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO session_ttns (session_id, ttn, status, message, registry) VALUES ($1,$2,$3,$4,$5)`,
+			s.ID, t.TTN, t.Status, t.Message, t.Registry,
+		); err != nil {
+			return nil, fmt.Errorf("insert ttn: %w", err)
+		}
+	}
+
+	if _, err := tx.Exec(ctx,
+		`UPDATE sessions SET ttn_count=(SELECT COUNT(*) FROM session_ttns WHERE session_id=$1) WHERE id=$1`,
+		s.ID,
+	); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	s.TTNCount = len(ttns)
+	return s, nil
 }
 
 // AbandonRunning marks all running sessions of a user as done before creating a new one.

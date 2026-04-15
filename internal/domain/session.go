@@ -13,6 +13,9 @@ const (
 type Session struct {
 	ID         string        `json:"id"`
 	UserID     string        `json:"user_id"`
+	UserEmail  string        `json:"user_email,omitempty"`
+	UserName   string        `json:"user_name,omitempty"`
+	DeviceType string        `json:"device_type"`
 	StartedAt  time.Time     `json:"started_at"`
 	FinishedAt *time.Time    `json:"finished_at,omitempty"`
 	TTNCount   int           `json:"ttn_count"`

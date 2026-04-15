@@ -22,7 +22,7 @@ func (h *SessionHandler) Create(w http.ResponseWriter, r *http.Request) {
 	userID := mw.GetUserID(r)
 	// Abandon any lingering running sessions before starting a new one
 	_ = h.sessions.AbandonRunning(r.Context(), userID)
-	s, err := h.sessions.Create(r.Context(), userID)
+	s, err := h.sessions.Create(r.Context(), userID, "web")
 	if err != nil {
 		Error(w, http.StatusInternalServerError, "failed to create session")
 		return

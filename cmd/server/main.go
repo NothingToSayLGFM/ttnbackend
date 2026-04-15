@@ -52,7 +52,7 @@ func main() {
 	npH := handler.NewNPHandler(npClient, apiKeyRepo, userRepo)
 	sessionH := handler.NewSessionHandler(sessionRepo)
 	apiKeyH := handler.NewAPIKeyHandler(apiKeyRepo)
-	desktopH := handler.NewDesktopHandler(userRepo, cfg.DesktopAppPath, cfg.ZebraAppPath)
+	desktopH := handler.NewDesktopHandler(userRepo, sessionRepo, cfg.DesktopAppPath, cfg.ZebraAppPath)
 
 	// Middleware factories
 	jwtMW := mw.JWT(authSvc)
@@ -71,6 +71,7 @@ func main() {
 		// Desktop public endpoints (auth via email+desktop_token, no JWT)
 		r.Post("/desktop/balance", desktopH.Balance)
 		r.Post("/desktop/deduct", desktopH.Deduct)
+		r.Post("/desktop/scan-report", desktopH.ScanReport)
 
 		// Authenticated
 		r.Group(func(r chi.Router) {
