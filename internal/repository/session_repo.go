@@ -160,6 +160,11 @@ func (r *SessionRepo) Finish(ctx context.Context, id string, status domain.Sessi
 	return err
 }
 
+func (r *SessionRepo) Delete(ctx context.Context, id string) error {
+	_, err := r.db.Exec(ctx, `DELETE FROM sessions WHERE id=$1`, id)
+	return err
+}
+
 // ReplaceTTNs deletes existing TTNs for the session and inserts the new ones.
 func (r *SessionRepo) ReplaceTTNs(ctx context.Context, sessionID string, ttns []*domain.SessionTTN) error {
 	tx, err := r.db.Begin(ctx)

@@ -96,6 +96,7 @@ func main() {
 			r.Post("/sessions", sessionH.Create)
 			r.Put("/sessions/{id}/ttns", sessionH.SaveTTNs)
 			r.Patch("/sessions/{id}", sessionH.Finish)
+			r.Delete("/sessions/{id}", sessionH.Delete)
 
 			// Nova Poshta proxy (balance checked inside handler)
 			r.Post("/np/validate", npH.Validate)
@@ -117,6 +118,7 @@ func main() {
 				r.Delete("/admin/users/{id}", userH.AdminDeleteUser)
 				r.Patch("/admin/users/{id}/scan-balance", userH.AdminSetScanBalance)
 				r.Get("/admin/sessions", sessionH.AdminList)
+				r.Delete("/admin/sessions/{id}", sessionH.AdminDelete)
 			})
 		})
 	})

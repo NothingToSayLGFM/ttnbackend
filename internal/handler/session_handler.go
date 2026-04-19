@@ -97,6 +97,33 @@ func (h *SessionHandler) Finish(w http.ResponseWriter, r *http.Request) {
 	JSON(w, http.StatusOK, s)
 }
 
+func (h *SessionHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	s, err := h.sessions.FindByID(r.Context(), id)
+	if err == domain.ErrNotFound {
+		Error(w, http.StatusNotFound, "session not found")
+		return
+	}
+	if s.UserID != mw.GetUserID(r) {
+		Error(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	if err := h.sessions.Delete(r.Context(), id); err != nil {
+		Error(w, http.StatusInternalServerError, "failed to delete session")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *SessionHandler) AdminDelete(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if err := h.sessions.Delete(r.Context(), id); err != nil {
+		Error(w, http.StatusInternalServerError, "failed to delete session")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *SessionHandler) AdminList(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
