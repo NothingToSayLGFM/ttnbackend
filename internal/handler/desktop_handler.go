@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/go-chi/chi/v5"
 	mw "ttnflow-api/internal/handler/middleware"
 	"ttnflow-api/internal/domain"
 	"ttnflow-api/internal/repository"
@@ -154,6 +155,132 @@ func (h *DesktopHandler) Deduct(w http.ResponseWriter, r *http.Request) {
 
 	updated, _ := h.users.FindByID(r.Context(), u.ID)
 	JSON(w, http.StatusOK, map[string]int{"scan_balance": updated.ScanBalance})
+}
+
+// SessionCreate creates a running session with analysis-phase TTN statuses.
+// POST /desktop/session-create
+func (h *DesktopHandler) SessionCreate(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Email      string `json:"email"`
+		Token      string `json:"token"`
+		DeviceType string `json:"device_type"`
+		TTNs       []struct {
+			TTN     string `json:"ttn"`
+			Status  string `json:"status"`
+			Message string `json:"message"`
+		} `json:"ttns"`
+	}
+	if err := Decode(r, &body); err != nil || body.Email == "" || body.Token == "" {
+		Error(w, http.StatusBadRequest, "email and token required")
+		return
+	}
+	u, err := h.users.FindByEmailAndToken(r.Context(), body.Email, body.Token)
+	if err != nil {
+		Error(w, http.StatusUnauthorized, "invalid credentials")
+		return
+	}
+	deviceType := body.DeviceType
+	if deviceType == "" {
+		deviceType = "desktop"
+	}
+	s, err := h.sessions.Create(r.Context(), u.ID, deviceType)
+	if err != nil {
+		Error(w, http.StatusInternalServerError, "failed to create session")
+		return
+	}
+	if len(body.TTNs) > 0 {
+		ttns := make([]*domain.SessionTTN, 0, len(body.TTNs))
+		for _, t := range body.TTNs {
+			ttns = append(ttns, &domain.SessionTTN{TTN: t.TTN, Status: t.Status, Message: t.Message})
+		}
+		_ = h.sessions.ReplaceTTNs(r.Context(), s.ID, ttns)
+	}
+	JSON(w, http.StatusCreated, map[string]string{"session_id": s.ID})
+}
+
+// SessionUpdateTTNs replaces TTNs in an existing running session (subsequent analysis chunks).
+// POST /desktop/session/{id}/update-ttns
+func (h *DesktopHandler) SessionUpdateTTNs(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "id")
+	var body struct {
+		Email string `json:"email"`
+		Token string `json:"token"`
+		TTNs  []struct {
+			TTN     string `json:"ttn"`
+			Status  string `json:"status"`
+			Message string `json:"message"`
+		} `json:"ttns"`
+	}
+	if err := Decode(r, &body); err != nil || body.Email == "" || body.Token == "" {
+		Error(w, http.StatusBadRequest, "email and token required")
+		return
+	}
+	if _, err := h.users.FindByEmailAndToken(r.Context(), body.Email, body.Token); err != nil {
+		Error(w, http.StatusUnauthorized, "invalid credentials")
+		return
+	}
+	ttns := make([]*domain.SessionTTN, 0, len(body.TTNs))
+	for _, t := range body.TTNs {
+		ttns = append(ttns, &domain.SessionTTN{TTN: t.TTN, Status: t.Status, Message: t.Message})
+	}
+	if err := h.sessions.ReplaceTTNs(r.Context(), sessionID, ttns); err != nil {
+		Error(w, http.StatusInternalServerError, "failed to update ttns")
+		return
+	}
+	JSON(w, http.StatusOK, map[string]string{"message": "updated"})
+}
+
+// SessionFinish updates TTNs with distribution results, finishes the session, and deducts balance.
+// POST /desktop/session/{id}/finish
+func (h *DesktopHandler) SessionFinish(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "id")
+	var body struct {
+		Email string `json:"email"`
+		Token string `json:"token"`
+		TTNs  []struct {
+			TTN      string `json:"ttn"`
+			Status   string `json:"status"`
+			Registry string `json:"registry"`
+			Message  string `json:"message"`
+		} `json:"ttns"`
+	}
+	if err := Decode(r, &body); err != nil || body.Email == "" || body.Token == "" {
+		Error(w, http.StatusBadRequest, "email and token required")
+		return
+	}
+	u, err := h.users.FindByEmailAndToken(r.Context(), body.Email, body.Token)
+	if err != nil {
+		Error(w, http.StatusUnauthorized, "invalid credentials")
+		return
+	}
+	ttns := make([]*domain.SessionTTN, 0, len(body.TTNs))
+	doneCount := 0
+	for _, t := range body.TTNs {
+		ttns = append(ttns, &domain.SessionTTN{TTN: t.TTN, Status: t.Status, Message: t.Message, Registry: t.Registry})
+		if t.Status == "done" {
+			doneCount++
+		}
+	}
+	if len(ttns) > 0 {
+		_ = h.sessions.ReplaceTTNs(r.Context(), sessionID, ttns)
+	}
+	_ = h.sessions.Finish(r.Context(), sessionID, domain.SessionDone)
+
+	if doneCount > 0 && u.ScanBalance != -1 {
+		toDeduct := doneCount
+		if u.ScanBalance < doneCount {
+			toDeduct = u.ScanBalance
+		}
+		if toDeduct > 0 {
+			_ = h.users.DeductScanBalance(r.Context(), u.ID, toDeduct)
+		}
+	}
+	updated, _ := h.users.FindByID(r.Context(), u.ID)
+	balance := -1
+	if updated != nil {
+		balance = updated.ScanBalance
+	}
+	JSON(w, http.StatusOK, map[string]any{"scan_balance": balance, "deducted": doneCount})
 }
 
 // ScanReport is a public endpoint (no JWT).

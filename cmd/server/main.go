@@ -72,6 +72,9 @@ func main() {
 		r.Post("/desktop/balance", desktopH.Balance)
 		r.Post("/desktop/deduct", desktopH.Deduct)
 		r.Post("/desktop/scan-report", desktopH.ScanReport)
+		r.Post("/desktop/session-create", desktopH.SessionCreate)
+		r.Post("/desktop/session/{id}/update-ttns", desktopH.SessionUpdateTTNs)
+		r.Post("/desktop/session/{id}/finish", desktopH.SessionFinish)
 
 		// Authenticated
 		r.Group(func(r chi.Router) {
