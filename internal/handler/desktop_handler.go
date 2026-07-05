@@ -397,6 +397,7 @@ func (h *DesktopHandler) buildZipTo(w io.Writer, email, token, appPath, folderNa
 	cfg := map[string]string{
 		"email":         email,
 		"desktop_token": token,
+		"api_base":      "https://ttnflow.price.stauto.com.ua/api/v1",
 	}
 	cfgBytes, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {

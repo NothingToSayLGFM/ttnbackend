@@ -11,6 +11,7 @@ type Config struct {
 	DatabaseURL    string
 	JWTSecret      string
 	Port           string
+	ListenAddr     string
 	NPAPIURL       string
 	TelegramURL    string
 	DesktopAppPath string
@@ -24,6 +25,7 @@ func Load() (*Config, error) {
 		DatabaseURL:    os.Getenv("DATABASE_URL"),
 		JWTSecret:      os.Getenv("JWT_SECRET"),
 		Port:           os.Getenv("PORT"),
+		ListenAddr:     os.Getenv("LISTEN_ADDR"),
 		NPAPIURL:       os.Getenv("NP_API_URL"),
 		TelegramURL:    os.Getenv("TELEGRAM_URL"),
 		DesktopAppPath: os.Getenv("DESKTOP_APP_PATH"),

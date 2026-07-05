@@ -4,6 +4,9 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
@@ -123,9 +126,32 @@ func main() {
 		})
 	})
 
-	log.Printf("starting on :%s", cfg.Port)
-	if err := http.ListenAndServe(":"+cfg.Port, r); err != nil {
+	// Serve Vue SPA at /app/
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/app/", http.StatusMovedPermanently)
+	})
+	r.Get("/app", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/app/", http.StatusMovedPermanently)
+	})
+	r.Get("/app/*", spaHandler("./static/app", "/app"))
+
+	addr := cfg.ListenAddr + ":" + cfg.Port
+	log.Printf("starting on %s", addr)
+	if err := http.ListenAndServe(addr, r); err != nil {
 		log.Fatalf("server: %v", err)
+	}
+}
+
+func spaHandler(staticDir, prefix string) http.HandlerFunc {
+	fs := http.FileServer(http.Dir(staticDir))
+	return func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, prefix)
+		fullPath := filepath.Join(staticDir, filepath.FromSlash(path))
+		if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+			http.ServeFile(w, r, filepath.Join(staticDir, "index.html"))
+			return
+		}
+		http.StripPrefix(prefix, fs).ServeHTTP(w, r)
 	}
 }
 
