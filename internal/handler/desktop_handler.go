@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	mw "ttnflow-api/internal/handler/middleware"
@@ -165,9 +166,10 @@ func (h *DesktopHandler) SessionCreate(w http.ResponseWriter, r *http.Request) {
 		Token      string `json:"token"`
 		DeviceType string `json:"device_type"`
 		TTNs       []struct {
-			TTN     string `json:"ttn"`
-			Status  string `json:"status"`
-			Message string `json:"message"`
+			TTN       string     `json:"ttn"`
+			Status    string     `json:"status"`
+			Message   string     `json:"message"`
+			ScannedAt *time.Time `json:"scanned_at"`
 		} `json:"ttns"`
 	}
 	if err := Decode(r, &body); err != nil || body.Email == "" || body.Token == "" {
@@ -191,7 +193,7 @@ func (h *DesktopHandler) SessionCreate(w http.ResponseWriter, r *http.Request) {
 	if len(body.TTNs) > 0 {
 		ttns := make([]*domain.SessionTTN, 0, len(body.TTNs))
 		for _, t := range body.TTNs {
-			ttns = append(ttns, &domain.SessionTTN{TTN: t.TTN, Status: t.Status, Message: t.Message})
+			ttns = append(ttns, &domain.SessionTTN{TTN: t.TTN, Status: t.Status, Message: t.Message, ScannedAt: t.ScannedAt})
 		}
 		_ = h.sessions.ReplaceTTNs(r.Context(), s.ID, ttns)
 	}
@@ -206,9 +208,10 @@ func (h *DesktopHandler) SessionUpdateTTNs(w http.ResponseWriter, r *http.Reques
 		Email string `json:"email"`
 		Token string `json:"token"`
 		TTNs  []struct {
-			TTN     string `json:"ttn"`
-			Status  string `json:"status"`
-			Message string `json:"message"`
+			TTN       string     `json:"ttn"`
+			Status    string     `json:"status"`
+			Message   string     `json:"message"`
+			ScannedAt *time.Time `json:"scanned_at"`
 		} `json:"ttns"`
 	}
 	if err := Decode(r, &body); err != nil || body.Email == "" || body.Token == "" {
@@ -221,7 +224,7 @@ func (h *DesktopHandler) SessionUpdateTTNs(w http.ResponseWriter, r *http.Reques
 	}
 	ttns := make([]*domain.SessionTTN, 0, len(body.TTNs))
 	for _, t := range body.TTNs {
-		ttns = append(ttns, &domain.SessionTTN{TTN: t.TTN, Status: t.Status, Message: t.Message})
+		ttns = append(ttns, &domain.SessionTTN{TTN: t.TTN, Status: t.Status, Message: t.Message, ScannedAt: t.ScannedAt})
 	}
 	if err := h.sessions.ReplaceTTNs(r.Context(), sessionID, ttns); err != nil {
 		Error(w, http.StatusInternalServerError, "failed to update ttns")
@@ -238,10 +241,11 @@ func (h *DesktopHandler) SessionFinish(w http.ResponseWriter, r *http.Request) {
 		Email string `json:"email"`
 		Token string `json:"token"`
 		TTNs  []struct {
-			TTN      string `json:"ttn"`
-			Status   string `json:"status"`
-			Registry string `json:"registry"`
-			Message  string `json:"message"`
+			TTN       string     `json:"ttn"`
+			Status    string     `json:"status"`
+			Registry  string     `json:"registry"`
+			Message   string     `json:"message"`
+			ScannedAt *time.Time `json:"scanned_at"`
 		} `json:"ttns"`
 	}
 	if err := Decode(r, &body); err != nil || body.Email == "" || body.Token == "" {
@@ -256,7 +260,7 @@ func (h *DesktopHandler) SessionFinish(w http.ResponseWriter, r *http.Request) {
 	ttns := make([]*domain.SessionTTN, 0, len(body.TTNs))
 	doneCount := 0
 	for _, t := range body.TTNs {
-		ttns = append(ttns, &domain.SessionTTN{TTN: t.TTN, Status: t.Status, Message: t.Message, Registry: t.Registry})
+		ttns = append(ttns, &domain.SessionTTN{TTN: t.TTN, Status: t.Status, Message: t.Message, Registry: t.Registry, ScannedAt: t.ScannedAt})
 		if t.Status == "done" {
 			doneCount++
 		}
@@ -292,10 +296,11 @@ func (h *DesktopHandler) ScanReport(w http.ResponseWriter, r *http.Request) {
 		Token      string `json:"token"`
 		DeviceType string `json:"device_type"`
 		TTNs       []struct {
-			TTN      string `json:"ttn"`
-			Status   string `json:"status"`
-			Registry string `json:"registry"`
-			Message  string `json:"message"`
+			TTN       string     `json:"ttn"`
+			Status    string     `json:"status"`
+			Registry  string     `json:"registry"`
+			Message   string     `json:"message"`
+			ScannedAt *time.Time `json:"scanned_at"`
 		} `json:"ttns"`
 	}
 	if err := Decode(r, &body); err != nil || body.Email == "" || body.Token == "" {
@@ -319,10 +324,11 @@ func (h *DesktopHandler) ScanReport(w http.ResponseWriter, r *http.Request) {
 	doneCount := 0
 	for _, t := range body.TTNs {
 		ttns = append(ttns, &domain.SessionTTN{
-			TTN:      t.TTN,
-			Status:   t.Status,
-			Message:  t.Message,
-			Registry: t.Registry,
+			TTN:       t.TTN,
+			Status:    t.Status,
+			Message:   t.Message,
+			Registry:  t.Registry,
+			ScannedAt: t.ScannedAt,
 		})
 		if t.Status == "done" {
 			doneCount++

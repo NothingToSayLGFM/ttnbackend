@@ -62,6 +62,10 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS desktop_token TEXT;
 -- Device type for sessions: 'web', 'desktop', 'zebra'
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS device_type TEXT NOT NULL DEFAULT 'web';
 
+-- Per-TTN scan timestamp: the moment the courier scanned the barcode on a Zebra handheld.
+-- NULL for file/paste input (web, TTNScanner, Zebra file mode) — those have no per-TTN scan event.
+ALTER TABLE session_ttns ADD COLUMN IF NOT EXISTS scanned_at TIMESTAMPTZ;
+
 -- Superadmin seed (change email and password before first run)
 INSERT INTO users (email, name, password_hash, role, scan_balance)
 VALUES (

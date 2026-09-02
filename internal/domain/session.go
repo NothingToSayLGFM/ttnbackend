@@ -23,11 +23,12 @@ type Session struct {
 }
 
 type SessionTTN struct {
-	ID        int64     `json:"id"`
-	SessionID string    `json:"session_id"`
-	TTN       string    `json:"ttn"`
-	Status    string    `json:"status"`
-	Message   string    `json:"message,omitempty"`
-	Registry  string    `json:"registry,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	ID        int64      `json:"id"`
+	SessionID string     `json:"session_id"`
+	TTN       string     `json:"ttn"`
+	Status    string     `json:"status"`
+	Message   string     `json:"message,omitempty"`
+	Registry  string     `json:"registry,omitempty"`
+	ScannedAt *time.Time `json:"scanned_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
 }

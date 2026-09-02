@@ -121,8 +121,8 @@ func (r *SessionRepo) CreateFinished(ctx context.Context, userID, deviceType str
 
 	for _, t := range ttns {
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO session_ttns (session_id, ttn, status, message, registry) VALUES ($1,$2,$3,$4,$5)`,
-			s.ID, t.TTN, t.Status, t.Message, t.Registry,
+			`INSERT INTO session_ttns (session_id, ttn, status, message, registry, scanned_at) VALUES ($1,$2,$3,$4,$5,$6)`,
+			s.ID, t.TTN, t.Status, t.Message, t.Registry, t.ScannedAt,
 		); err != nil {
 			return nil, fmt.Errorf("insert ttn: %w", err)
 		}
@@ -178,8 +178,8 @@ func (r *SessionRepo) ReplaceTTNs(ctx context.Context, sessionID string, ttns []
 	}
 	for _, t := range ttns {
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO session_ttns (session_id, ttn, status, message, registry) VALUES ($1,$2,$3,$4,$5)`,
-			sessionID, t.TTN, t.Status, t.Message, t.Registry,
+			`INSERT INTO session_ttns (session_id, ttn, status, message, registry, scanned_at) VALUES ($1,$2,$3,$4,$5,$6)`,
+			sessionID, t.TTN, t.Status, t.Message, t.Registry, t.ScannedAt,
 		); err != nil {
 			return fmt.Errorf("insert ttn: %w", err)
 		}
@@ -197,9 +197,9 @@ func (r *SessionRepo) AddTTNs(ctx context.Context, sessionID string, ttns []*dom
 	batch := &pgx.Batch{}
 	for _, t := range ttns {
 		batch.Queue(
-			`INSERT INTO session_ttns (session_id, ttn, status, message, registry)
-			 VALUES ($1, $2, $3, $4, $5)`,
-			sessionID, t.TTN, t.Status, t.Message, t.Registry,
+			`INSERT INTO session_ttns (session_id, ttn, status, message, registry, scanned_at)
+			 VALUES ($1, $2, $3, $4, $5, $6)`,
+			sessionID, t.TTN, t.Status, t.Message, t.Registry, t.ScannedAt,
 		)
 	}
 	batch.Queue(`UPDATE sessions SET ttn_count = (SELECT COUNT(*) FROM session_ttns WHERE session_id=$1) WHERE id=$1`, sessionID)
@@ -215,7 +215,7 @@ func (r *SessionRepo) AddTTNs(ctx context.Context, sessionID string, ttns []*dom
 
 func (r *SessionRepo) ListTTNs(ctx context.Context, sessionID string) ([]*domain.SessionTTN, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT id, session_id, ttn, status, COALESCE(message,''), COALESCE(registry,''), created_at
+		`SELECT id, session_id, ttn, status, COALESCE(message,''), COALESCE(registry,''), scanned_at, created_at
 		 FROM session_ttns WHERE session_id=$1 ORDER BY id`,
 		sessionID,
 	)
@@ -227,7 +227,7 @@ func (r *SessionRepo) ListTTNs(ctx context.Context, sessionID string) ([]*domain
 	var ttns []*domain.SessionTTN
 	for rows.Next() {
 		t := &domain.SessionTTN{}
-		if err := rows.Scan(&t.ID, &t.SessionID, &t.TTN, &t.Status, &t.Message, &t.Registry, &t.CreatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.SessionID, &t.TTN, &t.Status, &t.Message, &t.Registry, &t.ScannedAt, &t.CreatedAt); err != nil {
 			return nil, err
 		}
 		ttns = append(ttns, t)
